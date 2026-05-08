@@ -1,46 +1,61 @@
 import express from "express";
-import https from "https";
+import http from "http";
+import httpProxy from "http-proxy";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Backend target
 const BACKEND_HOST = "south.ayanakojivps.shop";
 
-app.use((req, res) => {
-  const options: https.RequestOptions = {
-    hostname: BACKEND_HOST,
+// Proxy instance (HTTP + WebSocket support)
+const proxy = httpProxy.createProxyServer({
+  target: {
+    host: BACKEND_HOST,
     port: 443,
-    path: req.url,
-    method: req.method,
-    headers: {
-      ...req.headers,
-      host: BACKEND_HOST
-    },
-    timeout: 15000
-  };
+    protocol: "https:"
+  },
+  changeOrigin: true,
+  ws: true,
+  secure: true
+});
 
-  const backendReq = https.request(options, (backendRes) => {
-    res.writeHead(backendRes.statusCode || 502, backendRes.headers);
-    backendRes.pipe(res);
-  });
-
-  backendReq.on("error", (err) => {
-    console.error("Proxy error:", err);
+// --------------------
+// HTTP proxy handler
+// --------------------
+app.use((req, res) => {
+  proxy.web(req, res, {}, (err) => {
+    console.error("HTTP proxy error:", err);
     if (!res.headersSent) {
       res.status(502).send("Bad Gateway");
     }
   });
-
-  backendReq.on("timeout", () => {
-    backendReq.destroy();
-    if (!res.headersSent) {
-      res.status(504).send("Gateway Timeout");
-    }
-  });
-
-  req.pipe(backendReq);
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Proxy running on", PORT);
+// --------------------
+// Server (needed for WS)
+// --------------------
+const server = http.createServer(app);
+
+// --------------------
+// WebSocket support
+// --------------------
+server.on("upgrade", (req, socket, head) => {
+  proxy.ws(req, socket, head, {
+    target: `https://${BACKEND_HOST}`
+  });
+});
+
+// --------------------
+// Error handling
+// --------------------
+proxy.on("error", (err) => {
+  console.error("Proxy error:", err);
+});
+
+// --------------------
+// Start
+// --------------------
+server.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`Reverse proxy running on port ${PORT}`);
 });
