@@ -5,10 +5,19 @@ import fs from "fs";
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
 
-// Route map type
+// -----------------------------
+// Types
+// -----------------------------
 type RouteMap = Record<string, string>;
 
-// Load routes
+type MatchResult = {
+  route: string;
+  target: string;
+};
+
+// -----------------------------
+// Load routes.json
+// -----------------------------
 let ROUTES: RouteMap = {};
 
 function loadRoutes(): void {
@@ -22,20 +31,25 @@ function loadRoutes(): void {
   }
 }
 
+// Initial load
 loadRoutes();
 
-// Optional auto reload
+// Auto reload every 5 sec
 setInterval(loadRoutes, 5000);
 
+// -----------------------------
 // Proxy
+// -----------------------------
 const proxy = httpProxy.createProxyServer({
   changeOrigin: true,
   ws: true,
   xfwd: true
 });
 
-// Match route
-function getTarget(pathname: string): { route: string; target: string } | null {
+// -----------------------------
+// Match target
+// -----------------------------
+function getTarget(pathname: string): MatchResult | null {
   for (const route of Object.keys(ROUTES)) {
     if (pathname.startsWith(route)) {
       return {
@@ -47,7 +61,9 @@ function getTarget(pathname: string): { route: string; target: string } | null {
   return null;
 }
 
-// HTTP
+// -----------------------------
+// HTTP Proxy
+// -----------------------------
 app.use((req: Request, res: Response) => {
   const match = getTarget(req.url);
 
@@ -56,6 +72,7 @@ app.use((req: Request, res: Response) => {
     return;
   }
 
+  // Remove path prefix before forwarding
   req.url = req.url.replace(match.route, "") || "/";
 
   proxy.web(req, res, { target: match.target }, (err) => {
@@ -66,26 +83,34 @@ app.use((req: Request, res: Response) => {
   });
 });
 
+// -----------------------------
 // Start server
+// -----------------------------
 const server = app.listen(PORT, "0.0.0.0", () => {
   console.log(`Dynamic proxy running on :${PORT}`);
 });
 
-// WebSocket
+// -----------------------------
+// WebSocket Proxy
+// -----------------------------
 server.on("upgrade", (req, socket, head) => {
-  const match = getTarget(req.url || "");
+  const originalUrl = req.url || "";
+  const match = getTarget(originalUrl);
 
   if (!match) {
     socket.destroy();
     return;
   }
 
-  req.url = req.url.replace(match.route, "") || "/";
+  // Remove path prefix before forwarding
+  req.url = originalUrl.replace(match.route, "") || "/";
 
   proxy.ws(req, socket, head, { target: match.target });
 });
 
-// Errors
+// -----------------------------
+// Error handling
+// -----------------------------
 proxy.on("error", (err) => {
   console.error("Proxy internal error:", err);
 });
