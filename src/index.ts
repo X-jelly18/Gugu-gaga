@@ -1,44 +1,64 @@
-import express from "express";
+import express, { Request, Response } from "express";
 import httpProxy from "http-proxy";
+import fs from "fs";
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = Number(process.env.PORT) || 8080;
 
-// Path → backend mapping
-const ROUTES = {
-  "/maibhhhh": "https://south.ayanakojivps.shop",
-  "/s1": "https://south2.ayanakojivps.shop",
-  "/s2": "https://south3.ayanakojivps.shop"
-};
+// Route map type
+type RouteMap = Record<string, string>;
 
-// create proxy
+// Load routes
+let ROUTES: RouteMap = {};
+
+function loadRoutes(): void {
+  try {
+    const raw = fs.readFileSync("./routes.json", "utf8");
+    ROUTES = JSON.parse(raw) as RouteMap;
+    console.log("Loaded routes:", ROUTES);
+  } catch (err) {
+    console.error("Failed to load routes.json:", err);
+    ROUTES = {};
+  }
+}
+
+loadRoutes();
+
+// Optional auto reload
+setInterval(loadRoutes, 5000);
+
+// Proxy
 const proxy = httpProxy.createProxyServer({
   changeOrigin: true,
   ws: true,
   xfwd: true
 });
 
-// function to choose backend
-function getTarget(pathname) {
-  for (const route in ROUTES) {
+// Match route
+function getTarget(pathname: string): { route: string; target: string } | null {
+  for (const route of Object.keys(ROUTES)) {
     if (pathname.startsWith(route)) {
-      return ROUTES[route];
+      return {
+        route,
+        target: ROUTES[route]
+      };
     }
   }
   return null;
 }
 
-// -----------------------------
-// HTTP proxy
-// -----------------------------
-app.use((req, res) => {
-  const target = getTarget(req.url);
+// HTTP
+app.use((req: Request, res: Response) => {
+  const match = getTarget(req.url);
 
-  if (!target) {
-    return res.status(404).send("Invalid path");
+  if (!match) {
+    res.status(404).send("Invalid path");
+    return;
   }
 
-  proxy.web(req, res, { target }, (err) => {
+  req.url = req.url.replace(match.route, "") || "/";
+
+  proxy.web(req, res, { target: match.target }, (err) => {
     console.error("Proxy error:", err);
     if (!res.headersSent) {
       res.status(502).send("Bad Gateway");
@@ -46,30 +66,26 @@ app.use((req, res) => {
   });
 });
 
-// -----------------------------
-// start server
-// -----------------------------
-const server = app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`Cloud Run path-based proxy running on :${PORT}`);
+// Start server
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Dynamic proxy running on :${PORT}`);
 });
 
-// -----------------------------
-// WebSocket support
-// -----------------------------
+// WebSocket
 server.on("upgrade", (req, socket, head) => {
-  const target = getTarget(req.url);
+  const match = getTarget(req.url || "");
 
-  if (!target) {
+  if (!match) {
     socket.destroy();
     return;
   }
 
-  proxy.ws(req, socket, head, { target });
+  req.url = req.url.replace(match.route, "") || "/";
+
+  proxy.ws(req, socket, head, { target: match.target });
 });
 
-// -----------------------------
-// Error handling
-// -----------------------------
+// Errors
 proxy.on("error", (err) => {
   console.error("Proxy internal error:", err);
 });
