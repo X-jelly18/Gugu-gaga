@@ -1,48 +1,51 @@
-import express, { Request, Response } from "express";
-import https from "https";
+import express from "express";
+import httpProxy from "http-proxy";
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Your backend
-const BACKEND_HOST = "south.ayanakojivps.shop";
+// ===== your original target =====
+const TARGET = "https://south.ayanakojivps.shop";
 
-// We must NOT block raw streams
-app.use((req: Request, res: Response) => {
-  const backendPath = req.url;
-
-  const options: https.RequestOptions = {
-    hostname: BACKEND_HOST,
-    port: 443,
-    path: backendPath,
-    method: req.method,
-    headers: {
-      ...req.headers,
-      host: BACKEND_HOST // important: force backend host header
-    }
-  };
-
-  const backendReq = https.request(options, (backendRes) => {
-    // Forward status + headers
-    res.writeHead(backendRes.statusCode || 502, backendRes.headers);
-
-    // Stream response back to client
-    backendRes.pipe(res);
-  });
-
-  backendReq.on("error", (err) => {
-    console.error("Backend request error:", err);
-    res.status(502).send("Bad Gateway");
-  });
-
-  // Stream request body (POST/PUT/etc.)
-  if (req.method !== "GET" && req.method !== "HEAD") {
-    req.pipe(backendReq);
-  } else {
-    backendReq.end();
-  }
+// create proxy
+const proxy = httpProxy.createProxyServer({
+  target: TARGET,
+  changeOrigin: true,
+  ws: true,
+  xfwd: true
 });
 
-app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`Reverse proxy running on port ${PORT}`);
+// -----------------------------
+// HTTP PROXY (same as Nginx → Node in VPS script)
+// -----------------------------
+app.use((req, res) => {
+  proxy.web(
+    req,
+    res,
+    { target: TARGET },
+    (err) => {
+      console.error("Proxy error:", err);
+      if (!res.headersSent) {
+        res.status(502).send("Bad Gateway");
+      }
+    }
+  );
+});
+
+// -----------------------------
+// WebSocket support (like nginx upgrade block)
+// -----------------------------
+const server = app.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`Cloud Run proxy running on :${PORT} → ${TARGET}`);
+});
+
+server.on("upgrade", (req, socket, head) => {
+  proxy.ws(req, socket, head, { target: TARGET });
+});
+
+// -----------------------------
+// Error handling (like your proxy.on("error"))
+// -----------------------------
+proxy.on("error", (err) => {
+  console.error("Proxy internal error:", err);
 });
