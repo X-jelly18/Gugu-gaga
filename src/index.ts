@@ -4,47 +4,71 @@ import httpProxy from "http-proxy";
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// ===== your original target =====
-const TARGET = "https://south.ayanakojivps.shop";
+// Path → backend mapping
+const ROUTES = {
+  "/maibhhhh": "https://south.ayanakojivps.shop",
+  "/s1": "https://south2.ayanakojivps.shop",
+  "/s2": "https://south3.ayanakojivps.shop"
+};
 
 // create proxy
 const proxy = httpProxy.createProxyServer({
-  target: TARGET,
   changeOrigin: true,
   ws: true,
   xfwd: true
 });
 
+// function to choose backend
+function getTarget(pathname) {
+  for (const route in ROUTES) {
+    if (pathname.startsWith(route)) {
+      return ROUTES[route];
+    }
+  }
+  return null;
+}
+
 // -----------------------------
-// HTTP PROXY (same as Nginx → Node in VPS script)
+// HTTP proxy
 // -----------------------------
 app.use((req, res) => {
-  proxy.web(
-    req,
-    res,
-    { target: TARGET },
-    (err) => {
-      console.error("Proxy error:", err);
-      if (!res.headersSent) {
-        res.status(502).send("Bad Gateway");
-      }
+  const target = getTarget(req.url);
+
+  if (!target) {
+    return res.status(404).send("Invalid path");
+  }
+
+  proxy.web(req, res, { target }, (err) => {
+    console.error("Proxy error:", err);
+    if (!res.headersSent) {
+      res.status(502).send("Bad Gateway");
     }
-  );
+  });
 });
 
 // -----------------------------
-// WebSocket support (like nginx upgrade block)
+// start server
 // -----------------------------
 const server = app.listen(Number(PORT), "0.0.0.0", () => {
-  console.log(`Cloud Run proxy running on :${PORT} → ${TARGET}`);
-});
-
-server.on("upgrade", (req, socket, head) => {
-  proxy.ws(req, socket, head, { target: TARGET });
+  console.log(`Cloud Run path-based proxy running on :${PORT}`);
 });
 
 // -----------------------------
-// Error handling (like your proxy.on("error"))
+// WebSocket support
+// -----------------------------
+server.on("upgrade", (req, socket, head) => {
+  const target = getTarget(req.url);
+
+  if (!target) {
+    socket.destroy();
+    return;
+  }
+
+  proxy.ws(req, socket, head, { target });
+});
+
+// -----------------------------
+// Error handling
 // -----------------------------
 proxy.on("error", (err) => {
   console.error("Proxy internal error:", err);
