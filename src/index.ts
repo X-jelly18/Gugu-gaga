@@ -2,9 +2,9 @@ import express from "express";
 import https from "https";
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT: number = parseInt(process.env.PORT || "8080", 10);
 
-const BACKEND_HOST = "six.ayanakojivps.shop";
+const BACKEND_HOST = "gsa.ayanakojivps.shop";
 
 app.use((req, res) => {
   const options: https.RequestOptions = {
@@ -26,6 +26,7 @@ app.use((req, res) => {
 
   backendReq.on("error", (err) => {
     console.error("Proxy error:", err);
+
     if (!res.headersSent) {
       res.status(502).send("Bad Gateway");
     }
@@ -33,6 +34,7 @@ app.use((req, res) => {
 
   backendReq.on("timeout", () => {
     backendReq.destroy();
+
     if (!res.headersSent) {
       res.status(504).send("Gateway Timeout");
     }
