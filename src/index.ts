@@ -4,7 +4,7 @@ import https from "https";
 const app = express();
 const PORT: number = parseInt(process.env.PORT || "8080", 10);
 
-const BACKEND_HOST = "gsa.ayanakojivps.shop";
+const BACKEND_HOST = "six.ayanakojivps.shop";
 
 app.use((req, res) => {
   const options: https.RequestOptions = {
